@@ -67,6 +67,12 @@ func RegisterGitLabTool(s *server.MCPServer) {
 		mcp.WithString("comment", mcp.Required(), mcp.Description("Comment text")),
 	)
 
+	listMRCommentsTool := mcp.NewTool("gitlab_list_mr_comments",
+		mcp.WithDescription("List all comments on a merge request"),
+		mcp.WithString("project_path", mcp.Required(), mcp.Description("Project/repo path")),
+		mcp.WithString("mr_iid", mcp.Required(), mcp.Description("Merge request IID")),
+	)
+
 	fileContentTool := mcp.NewTool("gitlab_get_file_content",
 		mcp.WithDescription("Get file content from a GitLab repository"),
 		mcp.WithString("project_path", mcp.Required(), mcp.Description("Project/repo path")),
@@ -120,6 +126,7 @@ func RegisterGitLabTool(s *server.MCPServer) {
 	s.AddTool(mrListTool, util.ErrorGuard(listMergeRequestsHandler))
 	s.AddTool(mrDetailsTool, util.ErrorGuard(getMergeRequestHandler))
 	s.AddTool(mrCommentTool, util.ErrorGuard(commentOnMergeRequestHandler))
+	s.AddTool(listMRCommentsTool, util.ErrorGuard(listMRCommentsHandler))
 	s.AddTool(fileContentTool, util.ErrorGuard(getFileContentHandler))
 	s.AddTool(pipelineTool, util.ErrorGuard(listPipelinesHandler))
 	s.AddTool(commitsTool, util.ErrorGuard(listCommitsHandler))
@@ -704,6 +711,100 @@ func createMergeRequestHandler(arguments map[string]interface{}) (*mcp.CallToolR
 	if mr.Description != "" {
 		result.WriteString("\nDescription:\n")
 		result.WriteString(mr.Description)
+	}
+
+	return mcp.NewToolResultText(result.String()), nil
+}
+
+func listMRCommentsHandler(arguments map[string]interface{}) (*mcp.CallToolResult, error) {
+	projectID := arguments["project_path"].(string)
+	mrIIDStr := arguments["mr_iid"].(string)
+
+	mrIID, err := strconv.Atoi(mrIIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid mr_iid: %v", err)
+	}
+
+	opt := &gitlab.ListMergeRequestNotesOptions{
+		ListOptions: gitlab.ListOptions{
+			PerPage: 100,
+		},
+		OrderBy: gitlab.Ptr("created_at"),
+		Sort:    gitlab.Ptr("desc"),
+	}
+
+	notes, _, err := gitlabClient().Notes.ListMergeRequestNotes(projectID, mrIID, opt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list merge request comments: %v", err)
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Comments for Merge Request !%d:\n\n", mrIID))
+
+	for _, note := range notes {
+		result.WriteString(fmt.Sprintf("ID: %d\n", note.ID))
+		result.WriteString(fmt.Sprintf("Author: %s\n", note.Author.Username))
+		result.WriteString(fmt.Sprintf("Created: %s\n", note.CreatedAt.Format("2006-01-02 15:04:05")))
+		if note.UpdatedAt != nil && !note.UpdatedAt.Equal(*note.CreatedAt) {
+			result.WriteString(fmt.Sprintf("Updated: %s\n", note.UpdatedAt.Format("2006-01-02 15:04:05")))
+		}
+		result.WriteString(fmt.Sprintf("Content: %s\n", note.Body))
+
+		if note.System {
+			result.WriteString("Type: System Note\n")
+		}
+
+		if note.Position != nil {
+			result.WriteString("Position Info:\n")
+			result.WriteString(fmt.Sprintf("  Base SHA: %s\n", note.Position.BaseSHA))
+			result.WriteString(fmt.Sprintf("  Start SHA: %s\n", note.Position.StartSHA))
+			result.WriteString(fmt.Sprintf("  Head SHA: %s\n", note.Position.HeadSHA))
+			result.WriteString(fmt.Sprintf("  Position Type: %s\n", note.Position.PositionType))
+
+			if note.Position.NewPath != "" {
+				result.WriteString(fmt.Sprintf("  New Path: %s\n", note.Position.NewPath))
+			}
+			if note.Position.NewLine != 0 {
+				result.WriteString(fmt.Sprintf("  New Line: %d\n", note.Position.NewLine))
+			}
+			if note.Position.OldPath != "" {
+				result.WriteString(fmt.Sprintf("  Old Path: %s\n", note.Position.OldPath))
+			}
+			if note.Position.OldLine != 0 {
+				result.WriteString(fmt.Sprintf("  Old Line: %d\n", note.Position.OldLine))
+			}
+
+			if note.Position.LineRange != nil {
+				result.WriteString("  Line Range:\n")
+				if note.Position.LineRange.StartRange != nil {
+					result.WriteString("    Start Range:\n")
+					result.WriteString(fmt.Sprintf("      Line Code: %s\n", note.Position.LineRange.StartRange.LineCode))
+					result.WriteString(fmt.Sprintf("      Type: %s\n", note.Position.LineRange.StartRange.Type))
+					result.WriteString(fmt.Sprintf("      Old Line: %d\n", note.Position.LineRange.StartRange.OldLine))
+					result.WriteString(fmt.Sprintf("      New Line: %d\n", note.Position.LineRange.StartRange.NewLine))
+				}
+				if note.Position.LineRange.EndRange != nil {
+					result.WriteString("    End Range:\n")
+					result.WriteString(fmt.Sprintf("      Line Code: %s\n", note.Position.LineRange.EndRange.LineCode))
+					result.WriteString(fmt.Sprintf("      Type: %s\n", note.Position.LineRange.EndRange.Type))
+					result.WriteString(fmt.Sprintf("      Old Line: %d\n", note.Position.LineRange.EndRange.OldLine))
+					result.WriteString(fmt.Sprintf("      New Line: %d\n", note.Position.LineRange.EndRange.NewLine))
+				}
+			}
+		}
+
+		if note.Resolvable {
+			result.WriteString("Resolvable: true\n")
+			result.WriteString(fmt.Sprintf("Resolved: %v\n", note.Resolved))
+			if note.Resolved {
+				result.WriteString(fmt.Sprintf("Resolved By: %s\n", note.ResolvedBy.Username))
+				if note.ResolvedAt != nil {
+					result.WriteString(fmt.Sprintf("Resolved At: %s\n", note.ResolvedAt.Format("2006-01-02 15:04:05")))
+				}
+			}
+		}
+
+		result.WriteString("\n")
 	}
 
 	return mcp.NewToolResultText(result.String()), nil
