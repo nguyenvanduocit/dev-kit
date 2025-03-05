@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/nguyenvanduocit/dev-kit/compare/v1.2.0...v1.3.0) (2025-03-05)
+
+
+### Features
+
+* add commit tool to assist with conventional commit messages ([e71b72d](https://github.com/nguyenvanduocit/dev-kit/commit/e71b72d8c904a7ab7f7a36fee60a373bf30a2ce6))
+
 ## [1.2.0](https://github.com/nguyenvanduocit/dev-kit/compare/v1.1.0...v1.2.0) (2025-03-05)
 
 
